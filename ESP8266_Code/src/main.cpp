@@ -5,6 +5,11 @@
 #include <ESP8266WebServer.h>
 #include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager
 #include <EEPROM.h>
+#include <PubSubClient.h>
+
+//Set to false when deploying with an Arduino intended to receive the messages
+//That way we're not sending garbage to the arduino it doesn't need
+#define DEBUG false
 
 //for LED status
 #include <Ticker.h>
@@ -22,6 +27,37 @@ int enrollmentServerIpStoreAddress = 8;
 
 bool eepromHasData = false;
 
+//Mqtt variables
+WiFiClient espClient;
+PubSubClient client(espClient);
+long lastMsg = 0;
+char msg[50];
+int value = 0;
+
+void writeDebugMsg(const char *msg)
+{
+  if (DEBUG)
+  {
+    Serial.println(msg);
+  }
+}
+
+void writeDebugMsg(String msg)
+{
+  if (DEBUG)
+  {
+    Serial.println(msg);
+  }
+}
+
+void writeDebugMsg(IPAddress msg)
+{
+  if (DEBUG)
+  {
+    Serial.println(msg);
+  }
+}
+
 void tick()
 {
   //toggle state
@@ -31,15 +67,15 @@ void tick()
 
 //gets called when WiFiManager enters configuration mode
 void configModeCallback (WiFiManager *myWiFiManager) {
-  Serial.println("Entered config mode");
-  Serial.println(WiFi.softAPIP());
+  writeDebugMsg("Entered config mode");
+  writeDebugMsg(WiFi.softAPIP());
   //if you used auto generated SSID, print it
-  Serial.println(myWiFiManager->getConfigPortalSSID());
+  writeDebugMsg(myWiFiManager->getConfigPortalSSID());
   //entered config mode, make led toggle faster
   ticker.attach(0.2, tick);
 }
 
-void startConfigPortal()
+void startConfigPortal(bool resetConfig = false)
 {
   if (!eepromHasData)
   {
@@ -68,7 +104,10 @@ void startConfigPortal()
   WiFiManagerParameter custom_enrollment_server("server", "Enrollment Server IP", ip, 20);
   wifiManager.addParameter( &custom_enrollment_server);
   //reset settings - for testing
-  //wifiManager.resetSettings();
+  if (resetConfig)
+  {
+    wifiManager.resetSettings();
+  }
 
   //set callback that gets called when connecting to previous WiFi fails, and enters Access Point mode
   wifiManager.setAPCallback(configModeCallback);
@@ -82,7 +121,7 @@ void startConfigPortal()
   strcpy(apSsid, "Enroller-");
   strcat(apSsid, clientId);
   if (!wifiManager.autoConnect(apSsid)) {
-    Serial.println("failed to connect and hit timeout");
+    writeDebugMsg("failed to connect and hit timeout");
     //reset and try again, or maybe put it to deep sleep
     ESP.reset();
     delay(1000);
@@ -101,15 +140,50 @@ void startConfigPortal()
   }
 
   //if you get here you have connected to the WiFi
-  Serial.println("connected...yeey :)");
+  writeDebugMsg("connected...yeey :)");
   ticker.detach();
 
-  Serial.println(WiFi.localIP());
-  Serial.print("Entered enrollment server IP: ");
-  Serial.println(enrollmentServerIp);
+  writeDebugMsg(WiFi.localIP());
+  writeDebugMsg("Entered enrollment server IP: ");
+  writeDebugMsg(enrollmentServerIp);
   //keep LED on
   digitalWrite(LED_BUILTIN, LOW);
   EEPROM.commit();
+}
+
+void callback(char* topic, byte* payload, unsigned int length) {
+  writeDebugMsg("Message arrived [");
+  writeDebugMsg(topic);
+  writeDebugMsg("] ");
+  for (int i = 0; i < length; i++) {
+    Serial.print((char)payload[i]);
+  }
+  writeDebugMsg("");
+}
+
+void reconnect() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    writeDebugMsg("Attempting MQTT connection...");
+    // Create a random client ID
+    // Attempt to connect
+    if (client.connect(clientId)) {
+      writeDebugMsg("connected");
+      // Once connected, publish an announcement...
+      client.publish("newClient", clientId);
+      // ... and resubscribe
+      char commandTopic[6];
+      strcpy(commandTopic, clientId);
+      strcat(commandTopic, "-commands");
+      client.subscribe(commandTopic);
+    } else {
+      writeDebugMsg("failed, rc=");
+      writeDebugMsg(client.state());
+      writeDebugMsg(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
 }
 
 void setup() {
@@ -123,23 +197,40 @@ void setup() {
   int value = EEPROM.read(0);
   if (value == 1)
   {
-    Serial.println("EEPROM has data we can read from");
+    writeDebugMsg("EEPROM has data we can read from");
     eepromHasData = true;
   }
   else
   {
-    Serial.println("EEPROM has no data");
+    writeDebugMsg("EEPROM has no data");
   }
   
-
   startConfigPortal();
 
   pinMode(TRIGGER_PIN, INPUT);
+
+  //Init Mqtt
+  client.setServer(enrollmentServerIp, 1883);
+  client.setCallback(callback);
 }
 
 void loop() {
+  //Echo whatever we read on serial up to the server
+  if (Serial.available() > 0)
+  {
+    String input = Serial.readStringUntil(';');
+    input = input + ';';
+    client.publish(clientId, (char*) input.c_str());
+  }
+
   // put your main code here, to run repeatedly:
   if ( digitalRead(TRIGGER_PIN) == LOW ) {
     startConfigPortal();
   }
+
+  //Mqtt
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();
 }
