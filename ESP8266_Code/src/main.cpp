@@ -225,7 +225,7 @@ void loop() {
 
   // put your main code here, to run repeatedly:
   if ( digitalRead(TRIGGER_PIN) == LOW ) {
-    startConfigPortal();
+    startConfigPortal(true);
   }
 
   //Mqtt
