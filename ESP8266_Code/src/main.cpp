@@ -228,7 +228,7 @@ void loop() {
     startConfigPortal(true);
   }
 
-  //Mqtt
+  //Mqttmio
   if (!client.connected()) {
     reconnect();
   }

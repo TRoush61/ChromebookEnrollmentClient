@@ -88,7 +88,6 @@ unsigned int rgbColour[3];
 #define in_developer_mode 0 // Set to 1 if device is in developer mode 
 
 int RXLED = 17;
-bool stopEnrollment = false;
 static uint8_t __clock_prescaler = (CLKPR & (_BV(CLKPS0) | _BV(CLKPS1) | _BV(CLKPS2) | _BV(CLKPS3)));
 String uuid = "";
 
@@ -162,25 +161,70 @@ void commandHandler(String command) {
   }
   else if(command.startsWith("Enroll"))
   {
-    if (command.substring(command.indexOf(':') + 1) == "Start")
+    command = command.substring(command.indexOf(':') + 1);
+    if (command == "Start")
     {
-      enrollDevice(command);
+      showVersion();
+      enterEnrollment();
+      writeString("Enroll:Success");
     }
-    else if(command.substring(command.indexOf(':') + 1) == "Stop")
+    else if (command == "WiFi")
     {
-      stopEnrollment = true;
+      wifiConfig();
+      writeString("Enroll:Success");
+    }
+    else if (command == "ToS")
+    {
+      ToS();
+      writeString("Enroll:Success");
+    }
+    else if (command == "Update")
+    {
+      updateViaGuest();
+      writeString("Enroll:Success");
+    }
+    else if(command == "Credentials")
+    {
+      enterCredentials();
+      writeString("Enroll:Success");
+    }
+    else if(command == "EnterUuid")
+    {
+      enterUuid(uuid);
+      writeString("Enroll:Success");
+    }
+    else if (command == "SignIn")
+    {
+      Keyboard.write(KEY_ENTER);
+      wait(10);
+      enterCredentials();
+      wait(90); // Wait for profile to load
+      if (enroll_device_cert){
+        certificateEnrollment(); // Enroll Device wide Certificate
+      }
+      if (remove_enrollment_wifi){
+        removeEnrollmentWifi(); // Remove non-managed Enrollment WiFi
+      }
+      writeString("Enroll:Success");
+    }
+    else if (command == "SkipAssetScreen")
+    {
+      shutDown();
+    }
+    else if (command == "ShowSuccess")
+    {
+      showSuccess();
+      writeString("Enroll:Success");
     }
     else
     {
-      uuid = command.substring(command.indexOf(':') + 1);
+      uuid = command;
     }
-    
   }
   
 }
 
 void enrollDevice(String command) {
-  stopEnrollment = false;
   showVersion();
   // Mouse.press(MOUSE_LEFT);
   // wait(1);
@@ -198,34 +242,18 @@ void enrollDevice(String command) {
   }   
   TXLED1; // Toggle the TX on-board LED
   wait(15 + longer_enrollment_time); // Wait device to download configuration
-  if (stopEnrollment)
-  {
-    return;
-  }
   TXLED0;
   if (update_via_guest){
     updateViaGuest(); // Enrollment keypress at the end (around line 447)to continue the enrollment process
   }
   enterCredentials(); // Max progress with powerwash set to true - Will Powerwash after typing the password but before submitting
   wait(50 + longer_enrollment_time); // wait for Enrollment to complete
-  if (stopEnrollment)
-  {
-    return;
-  }
   
   if (sign_in && skipAssetIdScreen){ // Do not sign-in if "skipAssetIdScreen" is false
     Keyboard.write(KEY_ENTER);
     wait(10);
-    if (stopEnrollment)
-    {
-      return;
-    }
     enterCredentials();
     wait(90); // Wait for profile to load
-    if (stopEnrollment)
-    {
-      return;
-    }
     if (enroll_device_cert){
       certificateEnrollment(); // Enroll Device wide Certificate
     }
@@ -288,7 +316,6 @@ void showSuccess() {
     }
     delay(250);
   }
-  writeString("Enroll:Success");
 }
 
 void repeatKey(byte key, int num) {
