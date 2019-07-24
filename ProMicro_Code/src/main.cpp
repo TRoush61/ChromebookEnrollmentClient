@@ -185,6 +185,9 @@ void commandHandler(String command) {
     }
     else if(command == "Credentials")
     {
+      //Make sure we're in enterprise enrollment
+      //Necessary in case we have paused do to a system restart
+      enterEnrollment();
       enterCredentials();
       writeString("Enroll:Success");
     }
