@@ -367,7 +367,11 @@ void enterUuid(String uuid)
   Keyboard.write('a');
   Keyboard.release(KEY_LEFT_CTRL);
   Keyboard.print(uuid);
-  repeatKey(KEY_TAB, 3);
+  //Can't just press enter to submit the UUID on new versions for whatever reason
+  if (device_version >= 70)
+  {
+    repeatKey(KEY_TAB, 3);
+  }
   Keyboard.write(KEY_ENTER);
 }
 
