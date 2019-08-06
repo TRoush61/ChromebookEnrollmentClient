@@ -18,7 +18,7 @@ Ticker ticker;
 // select which pin will trigger the configuration portal when set to LOW
 // ESP-01 users please note: the only pins available (0 and 2), are shared 
 // with the bootloader, so always set them HIGH at power-up
-#define TRIGGER_PIN 0
+#define WIFI_RESET_PIN 2
 
 char clientId[6];
 int clientIdStoreAddress = 1;
@@ -33,6 +33,8 @@ PubSubClient client(espClient);
 long lastMsg = 0;
 char msg[50];
 int value = 0;
+
+bool ledStatus = false;
 
 void writeDebugMsg(const char *msg)
 {
@@ -60,9 +62,15 @@ void writeDebugMsg(IPAddress msg)
 
 void tick()
 {
-  //toggle state
-  int state = digitalRead(LED_BUILTIN);  // get the current state of GPIO1 pin
-  digitalWrite(LED_BUILTIN, !state);     // set pin to the opposite state
+  if (ledStatus)
+  {
+    Serial.print("RGB:r000g000b000;");
+  }
+  else
+  {
+    Serial.print("RGB:r000g000b255;");
+  }
+  ledStatus = !ledStatus;
 }
 
 //gets called when WiFiManager enters configuration mode
@@ -91,8 +99,6 @@ void startConfigPortal(bool resetConfig = false)
   }
   
 
-  //set led pin as output
-  pinMode(LED_BUILTIN, OUTPUT);
   // start ticker with 0.5 because we start in AP mode and try to connect
   ticker.attach(0.6, tick);
 
@@ -141,13 +147,15 @@ void startConfigPortal(bool resetConfig = false)
 
   //if you get here you have connected to the WiFi
   writeDebugMsg("connected...yeey :)");
+
+  //detach status indicator and turn LED indicator off
   ticker.detach();
+  Serial.print("RGB:r000g000b000;");
 
   writeDebugMsg(WiFi.localIP());
   writeDebugMsg("Entered enrollment server IP: ");
   writeDebugMsg(enrollmentServerIp);
-  //keep LED on
-  digitalWrite(LED_BUILTIN, LOW);
+
   EEPROM.commit();
 }
 
@@ -165,6 +173,7 @@ void reconnect() {
   // Loop until we're reconnected
   while (!client.connected()) {
     writeDebugMsg("Attempting MQTT connection...");
+    writeDebugMsg(enrollmentServerIp);
     // Create a random client ID
     // Attempt to connect
     if (client.connect(clientId)) {
@@ -192,6 +201,8 @@ void setup() {
 
   EEPROM.begin(512);
 
+  pinMode(WIFI_RESET_PIN, INPUT);
+
   clientId[0] = '\0';
 
   int value = EEPROM.read(0);
@@ -206,8 +217,6 @@ void setup() {
   }
   
   startConfigPortal();
-
-  pinMode(TRIGGER_PIN, INPUT);
 
   //Init Mqtt
   client.setServer(enrollmentServerIp, 1883);
@@ -224,7 +233,7 @@ void loop() {
   }
 
   // put your main code here, to run repeatedly:
-  if ( digitalRead(TRIGGER_PIN) == LOW ) {
+  if ( digitalRead(WIFI_RESET_PIN) == LOW ) {
     startConfigPortal(true);
   }
 
