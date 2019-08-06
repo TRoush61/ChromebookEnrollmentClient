@@ -1,3 +1,5 @@
+#include <FS.h>                   //this needs to be first, or it all crashes and burns...
+
 #include <ESP8266WiFi.h>          //https://github.com/esp8266/Arduino
 
 //needed for library
@@ -6,6 +8,8 @@
 #include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager
 #include <EEPROM.h>
 #include <PubSubClient.h>
+//Update server
+#include <ESP8266HTTPUpdateServer.h>
 
 //Set to false when deploying with an Arduino intended to receive the messages
 //That way we're not sending garbage to the arduino it doesn't need
@@ -18,7 +22,7 @@ Ticker ticker;
 // select which pin will trigger the configuration portal when set to LOW
 // ESP-01 users please note: the only pins available (0 and 2), are shared 
 // with the bootloader, so always set them HIGH at power-up
-#define WIFI_RESET_PIN 2
+#define WIFI_RESET_PIN 0
 
 char clientId[6];
 int clientIdStoreAddress = 1;
@@ -36,6 +40,7 @@ int value = 0;
 
 bool ledStatus = false;
 
+//debug message functions
 void writeDebugMsg(const char *msg)
 {
   if (DEBUG)
@@ -58,6 +63,46 @@ void writeDebugMsg(IPAddress msg)
   {
     Serial.println(msg);
   }
+}
+
+//update server stuff
+std::unique_ptr<ESP8266WebServer> server;
+std::unique_ptr<ESP8266HTTPUpdateServer> updateServer;
+
+void handleRoot() {
+  server->send(200, "text/plain", "Welcome to the Chromebook Enrollment Client!");
+}
+
+void handleNotFound() {
+  String message = "File Not Found\n\n";
+  message += "URI: ";
+  message += server->uri();
+  message += "\nMethod: ";
+  message += (server->method() == HTTP_GET) ? "GET" : "POST";
+  message += "\nArguments: ";
+  message += server->args();
+  message += "\n";
+  for (uint8_t i = 0; i < server->args(); i++) {
+    message += " " + server->argName(i) + ": " + server->arg(i) + "\n";
+  }
+  server->send(404, "text/plain", message);
+}
+
+void initWebServer()
+{
+  server.reset(new ESP8266WebServer(WiFi.localIP(), 80));
+
+  server->on("/", handleRoot);
+
+  server->onNotFound(handleNotFound);
+
+  updateServer.reset(new ESP8266HTTPUpdateServer());
+
+  updateServer->setup(server.get());
+
+  server->begin();
+
+  writeDebugMsg("HTTP server started");
 }
 
 void tick()
@@ -150,6 +195,7 @@ void startConfigPortal(bool resetConfig = false)
 
   //detach status indicator and turn LED indicator off
   ticker.detach();
+  delay(1000);
   Serial.print("RGB:r000g000b000;");
 
   writeDebugMsg(WiFi.localIP());
@@ -218,12 +264,19 @@ void setup() {
   
   startConfigPortal();
 
+  //turn our LED off. Setup is complete
+  Serial.print("RGB:r000g000b000;");
+
+  initWebServer();
+
   //Init Mqtt
   client.setServer(enrollmentServerIp, 1883);
   client.setCallback(callback);
 }
 
 void loop() {
+  server->handleClient();
+
   //Echo whatever we read on serial up to the server
   if (Serial.available() > 0)
   {
@@ -234,7 +287,13 @@ void loop() {
 
   // put your main code here, to run repeatedly:
   if ( digitalRead(WIFI_RESET_PIN) == LOW ) {
+    ticker.attach(0.2, tick);
+
     startConfigPortal(true);
+
+    ticker.detach();
+
+    initWebServer();
   }
 
   //Mqttmio
