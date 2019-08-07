@@ -10,6 +10,7 @@
 #include <PubSubClient.h>
 //Update server
 #include <ESP8266HTTPUpdateServer.h>
+#include <index.html.h>
 
 //Set to false when deploying with an Arduino intended to receive the messages
 //That way we're not sending garbage to the arduino it doesn't need
@@ -37,6 +38,7 @@ PubSubClient client(espClient);
 long lastMsg = 0;
 char msg[50];
 int value = 0;
+long lastConnectionAttempt = millis();
 
 bool ledStatus = false;
 
@@ -70,7 +72,7 @@ std::unique_ptr<ESP8266WebServer> server;
 std::unique_ptr<ESP8266HTTPUpdateServer> updateServer;
 
 void handleRoot() {
-  server->send(200, "text/plain", "Welcome to the Chromebook Enrollment Client!");
+  server->send(200, "text/html", INDEX_HTML);
 }
 
 void handleNotFound() {
@@ -209,35 +211,40 @@ void callback(char* topic, byte* payload, unsigned int length) {
   writeDebugMsg("Message arrived [");
   writeDebugMsg(topic);
   writeDebugMsg("] ");
+  String msg = "";
   for (int i = 0; i < length; i++) {
     Serial.print((char)payload[i]);
+    msg += (char)payload[i];
+  }
+  //Handle IP request
+  if (msg == "IPAddress;")
+  {
+    char buf[16];
+    sprintf(buf, "IPAddress:%d.%d.%d.%d", WiFi.localIP()[0], WiFi.localIP()[1], WiFi.localIP()[2], WiFi.localIP()[3] );
+    client.publish(clientId, buf);
   }
   writeDebugMsg("");
 }
 
 void reconnect() {
-  // Loop until we're reconnected
-  while (!client.connected()) {
-    writeDebugMsg("Attempting MQTT connection...");
-    writeDebugMsg(enrollmentServerIp);
-    // Create a random client ID
-    // Attempt to connect
-    if (client.connect(clientId)) {
-      writeDebugMsg("connected");
-      // Once connected, publish an announcement...
-      client.publish("newClient", clientId);
-      // ... and resubscribe
-      char commandTopic[6];
-      strcpy(commandTopic, clientId);
-      strcat(commandTopic, "-commands");
-      client.subscribe(commandTopic);
-    } else {
-      writeDebugMsg("failed, rc=");
-      writeDebugMsg(client.state());
-      writeDebugMsg(" try again in 5 seconds");
-      // Wait 5 seconds before retrying
-      delay(5000);
-    }
+  writeDebugMsg("Attempting MQTT connection...");
+  writeDebugMsg(enrollmentServerIp);
+  // Create a random client ID
+  // Attempt to connect
+  if (client.connect(clientId)) {
+    writeDebugMsg("connected");
+    // Once connected, publish an announcement...
+    client.publish("newClient", clientId);
+    // ... and resubscribe
+    char commandTopic[6];
+    strcpy(commandTopic, clientId);
+    strcat(commandTopic, "-commands");
+    client.subscribe(commandTopic);
+  } else {
+    writeDebugMsg("failed, rc=");
+    writeDebugMsg(client.state());
+    writeDebugMsg(" try again in 5 seconds");
+    lastConnectionAttempt = millis();
   }
 }
 
@@ -298,7 +305,13 @@ void loop() {
 
   //Mqttmio
   if (!client.connected()) {
-    reconnect();
+    if ((millis() - lastConnectionAttempt) > 5000)
+    {
+      reconnect();
+    }
   }
-  client.loop();
+  else
+  {
+    client.loop();
+  }
 }
